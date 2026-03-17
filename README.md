@@ -1,323 +1,203 @@
-# bmad-atlassian-sync
+# atlassian-sync
 
-Bidirectional sync between [BMAD](https://github.com/bmad-method/bmad) `.md` artifacts and Jira Cloud / Confluence Cloud via REST APIs.
+Bidirectional sync between Markdown artifacts and Jira Cloud / Confluence Cloud. Built for the [BMAD Method](https://github.com/bmad-method/bmad) but works standalone with any project.
 
----
+## What It Does
 
-## Overview
+- **Push** `.md` files to Jira as Stories, Epics, or Tasks (create or update)
+- **Pull** Jira state back into `.md` frontmatter (status, timestamps)
+- **Bidirectional conflict resolution** with merge strategy (status always advances forward)
+- **Publish Confluence pages** for sprint summaries, retrospectives, and change proposals
+- **BMAD workflow integration** via shared skill files that hook into sprint-planning, create-story, dev-story, and 5 more workflows
+- **Standalone CLI** for any project with Markdown files
 
-`bmad-atlassian-sync` bridges BMAD's file-based project management workflow with Atlassian's Jira and Confluence. It keeps your local `.md` story and epic files in sync with Jira issues, and publishes sprint, retrospective, and change-proposal artifacts as Confluence pages — automatically, as part of your BMAD workflow, or manually via a standalone CLI.
+## Prerequisites
 
----
+- **Python 3.8+** (bundled API client uses only stdlib — no pip packages)
+- **Node.js 18+** and **npm** (for the TypeScript sync engine)
+- **Atlassian Cloud account** with:
+  - A Jira project
+  - A Confluence space
+  - A service account API token (see [Authentication](#authentication) below)
 
-## Features
+## Authentication
 
-- **Push stories and epics** to Jira as Stories/Epics (creates new issues or updates existing ones)
-- **Pull Jira state** into local `.md` frontmatter (status, timestamps, remote changes)
-- **Bidirectional conflict resolution** — four strategies: `merge`, `local-wins`, `remote-wins`, `ask`
-- **Publish Confluence pages** — sprint summaries, retrospectives, and change proposals
-- **BMAD workflow integration** — shared skill files hook into sprint-planning, create-story, dev-story, and more
-- **Standalone CLI** — works without BMAD for any project with Markdown files
-- **Frontmatter-driven** — `jira_key`, `confluence_page_id`, `last_synced_at` written back to `.md` files automatically
-- **Status mapping** — BMAD statuses mapped to Jira transitions (never-downgrade enforced)
-- **No external YAML dependencies** — lightweight parsers with no runtime bloat
+This tool uses the Atlassian Cloud API via `api.atlassian.com` with Basic auth (service account email + API token).
 
----
+### Required API Token Scopes
+
+Create a service account at [admin.atlassian.com](https://admin.atlassian.com) and generate an API token with these scopes:
+
+**Jira Platform:**
+- `read:jira-work`, `write:jira-work`, `read:jira-user`, `read:me`
+
+**Jira Software:**
+- `read:board-scope:jira-software`, `read:board-scope.admin:jira-software`
+- `read:sprint:jira-software`, `write:sprint:jira-software`
+- `read:issue:jira-software`, `write:issue:jira-software`
+- `read:epic:jira-software`, `write:epic:jira-software`
+
+**Confluence:**
+- `read:confluence-content.all`, `read:confluence-space.summary`
+- `write:confluence-content`, `write:confluence-file`
+
+### Environment Variables
+
+Create a `.env` file in your project root (copy from `.env.example`):
+
+```env
+ATLASSIAN_SA_EMAIL=your-service-account@serviceaccount.atlassian.com
+ATLASSIAN_API_TOKEN=your-api-token
+ATLASSIAN_CLOUD_ID=your-cloud-id
+ATLASSIAN_SITE_URL=https://your-domain.atlassian.net
+JIRA_PROJECT_KEY=PROJ
+CONFLUENCE_SPACE_KEY=PROJ
+JIRA_BOARD_ID=1
+```
+
+Find your Cloud ID at: `https://your-domain.atlassian.net/_edge/tenant_info`
 
 ## Installation
 
 ### Option A: BMAD Project Integration
 
-Use the install script to copy skill files and the CLI into an existing BMAD project:
-
 ```bash
-git clone https://github.com/your-org/bmad-atlassian-sync.git
-cd bmad-atlassian-sync
+git clone https://github.com/3D-Stories/atlassian-sync.git
+cd atlassian-sync
 ./scripts/install-bmad.sh /path/to/your-bmad-project
 ```
 
-This copies the BMAD skill files to `.claude/skills/bmad-atlassian-sync/` and the CLI source to `.claude/tools/atlassian-sync/` inside your project, then runs `npm install`.
+This copies:
+- Skill files to `.claude/skills/bmad-atlassian-sync/`
+- Sync engine to `.claude/tools/atlassian-sync/`
+- `.env.atlassian.example` to your project root
+
+Then add to your `_bmad/bmm/config.yaml`:
+
+```yaml
+atlassian_sync: enabled
+jira_project_key: PROJ
+jira_board_id: 1
+confluence_space_key: PROJ
+```
 
 ### Option B: Standalone CLI
 
-Install the CLI globally to `~/.local/share/atlassian-sync` with a wrapper in `~/.local/bin`:
-
 ```bash
 ./scripts/install-standalone.sh
-# Optional: install to a custom directory
-./scripts/install-standalone.sh /opt/atlassian-sync
-```
-
-Make sure `~/.local/bin` is in your `PATH`, then run:
-
-```bash
 atlassian-sync --help
 ```
 
-### Option C: Run Directly from Source
+### Option C: Run from Source
 
 ```bash
-git clone https://github.com/your-org/bmad-atlassian-sync.git
-cd bmad-atlassian-sync
+git clone https://github.com/3D-Stories/atlassian-sync.git
+cd atlassian-sync
 npm install
 npx tsx src/cli.ts --help
 ```
 
----
-
-## Configuration
-
-### Environment Variables (`.env`)
-
-Create a `.env` file in your project root (copy from `.env.example`):
-
-```bash
-JIRA_BASE_URL=https://your-domain.atlassian.net
-JIRA_EMAIL=you@example.com
-JIRA_API_TOKEN=your-api-token
-CONFLUENCE_BASE_URL=https://your-domain.atlassian.net/wiki
-CONFLUENCE_SPACE_KEY=PROJ
-JIRA_PROJECT_KEY=PROJ
-JIRA_BOARD_ID=1
-```
-
-Your Jira API token can be generated at: https://id.atlassian.com/manage-profile/security/api-tokens
-
-### BMAD Config Extension
-
-Add the following to your project's `_bmad/bmm/config.yaml` to enable sync in BMAD workflows. See `bmad-integration/config/bmad-config-extension.yaml` for the full template:
-
-```yaml
-atlassian_sync: enabled
-jira_base_url: "https://your-domain.atlassian.net"
-jira_project_key: "PROJ"
-jira_email: "${JIRA_EMAIL}"
-jira_api_token: "${JIRA_API_TOKEN}"
-jira_board_id: 1
-confluence_base_url: "https://your-domain.atlassian.net/wiki"
-confluence_space_key: "PROJ"
-```
-
-`${VAR}` placeholders are resolved from your `.env` file at runtime.
-
-### Standalone Config File
-
-For non-BMAD projects, create `atlassian-sync.yaml` in your project root. See `bmad-integration/config/atlassian-sync.yaml.example` for the template:
-
-```yaml
-jira:
-  base_url: "https://your-domain.atlassian.net"
-  project_key: "PROJ"
-  board_id: 1
-
-confluence:
-  base_url: "https://your-domain.atlassian.net/wiki"
-  space_key: "PROJ"
-
-sync:
-  enabled: true
-  conflict_strategy: merge  # merge | local-wins | remote-wins | ask
-```
-
-Credentials are always loaded from `.env` — never put secrets in the config file.
-
----
-
 ## CLI Usage
 
-```
-atlassian-sync <command> [file] [options]
-
-Commands:
-  push           Push a local .md file to Jira (creates or updates issue)
-  pull           Pull latest Jira status into a local .md file
-  sync           Pull then push — bidirectional merge
-
-Options:
-  --type <type>           Artifact type: story | epic | page  (default: story)
-  --env <path>            Path to .env file                   (default: .env)
-  --bmad-config <path>    Path to BMAD config.yaml
-```
-
-### Examples
-
 ```bash
-# Push a story .md to Jira (creates issue, writes jira_key back to file)
-atlassian-sync push docs/stories/1-1-user-auth.md
+# Push a story to Jira (creates issue, writes jira_key back to file)
+atlassian-sync push stories/1-1-user-auth.md
 
-# Pull Jira state into a local story file (requires jira_key in frontmatter)
-atlassian-sync pull docs/stories/1-1-user-auth.md
+# Pull latest Jira state into local file
+atlassian-sync pull stories/1-1-user-auth.md
 
-# Bidirectional sync
-atlassian-sync sync docs/stories/1-1-user-auth.md
+# Bidirectional sync (pull then push)
+atlassian-sync sync stories/1-1-user-auth.md
 
 # Push an epic
-atlassian-sync push docs/epics/epic-1.md --type epic
-
-# Use a specific .env file
-atlassian-sync push docs/stories/1-1-user-auth.md --env .env.local
-
-# Use BMAD config for credentials
-atlassian-sync push docs/stories/1-1-user-auth.md --bmad-config _bmad/bmm/config.yaml
+atlassian-sync push epics/epic-1.md --type epic
 ```
 
+### Python CLI (Direct API Access)
+
+The bundled Python CLI can be used directly for quick operations:
+
+```bash
+# Jira
+python3 src/python/atlassian_cli.py jira get PROJ-42
+python3 src/python/atlassian_cli.py jira create PROJ Story "Story title" "Description"
+python3 src/python/atlassian_cli.py jira search "project = PROJ AND status = 'To Do'"
+python3 src/python/atlassian_cli.py jira comment PROJ-42 "Implementation complete"
+python3 src/python/atlassian_cli.py jira transitions PROJ-42
+python3 src/python/atlassian_cli.py jira transition PROJ-42 31
+python3 src/python/atlassian_cli.py jira create-sprint 1 "Sprint 1" "Sprint goal"
+python3 src/python/atlassian_cli.py jira move-to-sprint 42 PROJ-1 PROJ-2
+
+# Confluence
+python3 src/python/atlassian_cli.py confluence get 12345
+python3 src/python/atlassian_cli.py confluence find "Page Title"
+python3 src/python/atlassian_cli.py confluence create "Page Title" body.html --parent 12345
+echo "<h2>Hello</h2>" | python3 src/python/atlassian_cli.py confluence create "Title" -
+```
+
+## Frontmatter
+
+The sync engine reads and writes YAML frontmatter in `.md` files:
+
+```yaml
 ---
-
-## Frontmatter Fields
-
-The CLI reads and writes the following fields in `.md` file frontmatter:
-
-| Field | Direction | Description |
-|---|---|---|
-| `jira_key` | Written on create, read on update | Jira issue key (e.g., `PROJ-42`) |
-| `confluence_page_id` | Written on create, read on update | Confluence page ID |
-| `status` | Read (push) / Written (pull) | BMAD workflow status |
-| `last_synced_at` | Written | ISO 8601 timestamp of last sync |
-| `jira_updated_at` | Written (pull) | Jira issue `updated` timestamp |
-| `confluence_updated_at` | Written (pull) | Confluence page `updated` timestamp |
-| `sync_hash` | Written | Hash for change detection |
-| `assignee` | Read/written | User email for Jira assignee |
-
+story_key: 1-1-user-auth
+status: ready-for-dev
+jira_key: PROJ-42
+confluence_page_id: 12345
+last_synced_at: "2026-03-16T14:30:00Z"
+jira_updated_at: "2026-03-16T14:30:00Z"
 ---
-
-## Status Mappings
-
-| BMAD Status | Jira Status | Jira Transition |
-|---|---|---|
-| `draft` | To Do | (initial state — no transition) |
-| `ready` | To Do | To Do |
-| `in-progress` | In Progress | Start Progress |
-| `in-review` | In Review | Send to Review |
-| `done` | Done | Mark Done |
-| `accepted` | Done | Mark Done |
-| `blocked` | In Progress | Start Progress + `blocked` label |
-| `cancelled` | Won't Do | Won't Do |
-
-**Never-downgrade rule:** if the Jira issue is at a more advanced status than the local file, the status transition is skipped and a warning is logged.
-
----
+```
 
 ## BMAD Skill Integration
 
-After running `install-bmad.sh`, the following shared skill files are available in `.claude/skills/bmad-atlassian-sync/`:
+After `install-bmad.sh`, these workflows automatically sync to Jira/Confluence:
 
-| File | Purpose |
-|---|---|
-| `SKILL.md` | Skill entry point and description |
-| `workflow.md` | Full sync workflow — all available operations |
-| `sync-on-start.md` | Included by BMAD skills on story/sprint start |
-| `sync-on-complete.md` | Included by BMAD skills on story/sprint complete |
-| `jira-mappings.md` | BMAD artifact → Jira issue type and status mappings |
-| `confluence-mappings.md` | Confluence page hierarchy and parent page mappings |
+| Skill | Jira Action | Confluence Action |
+|---|---|---|
+| `sprint-planning` | Create epics, stories, sprint | Create sprint overview page |
+| `create-story` | Create Jira story | -- |
+| `dev-story` | Transition In Progress / In Review | -- |
+| `correct-course` | Create change-request issue | Create change proposal page |
+| `retrospective` | Comment on epic | Create retrospective page |
+| `sprint-status` | Pull latest statuses | Update sprint page |
+| `code-review` | Comment with findings | -- |
+| `create-epics-and-stories` | Create all epics + stories | -- |
 
-BMAD workflows that integrate with atlassian-sync include: `sprint-planning`, `create-story`, `dev-story`, `correct-course`, `retrospective`, `code-review`, `sprint-status`, and `create-epics-and-stories`.
-
-To invoke the skill manually in a Claude Code session:
-
-```
-/bmad-atlassian-sync push --type story docs/stories/1-1-user-auth.md
-```
-
----
-
-## Conflict Resolution Strategies
-
-When local and remote (Jira) statuses differ, the CLI applies the configured conflict strategy:
-
-| Strategy | Behavior |
-|---|---|
-| `merge` | Takes the more advanced status (default) |
-| `local-wins` | Always uses local `.md` status |
-| `remote-wins` | Always uses Jira status |
-| `ask` | Prompts for user input (interactive mode) |
-
-Configure via `SYNC_CONFLICT_STRATEGY` env var or `sync.conflict_strategy` in config.
-
----
+All sync steps check `atlassian_sync: enabled` in config and skip silently when not configured.
 
 ## Architecture
 
 ```
 src/
-  cli.ts                    # CLI entry point — argument parsing and command dispatch
-  config.ts                 # Config loader — .env + BMAD config.yaml + env var resolution
-  clients/
-    jira-client.ts          # Jira REST API v3 client
-    confluence-client.ts    # Confluence REST API v2 client
-    adf.ts                  # Atlassian Document Format helpers
-  parsers/
-    md-frontmatter.ts       # YAML frontmatter parser/updater for .md files
-    sprint-status.ts        # sprint-status.yaml parser/updater
-  sync/
-    sync-engine.ts          # Orchestrates push/pull operations
-    conflict-resolver.ts    # Status conflict resolution logic
-    field-mapper.ts         # Maps BMAD fields to Jira/Confluence API fields
-  templates/
-    sprint-page.ts          # Confluence sprint summary page template
-    retro-page.ts           # Confluence retrospective page template
-    change-proposal-page.ts # Confluence change proposal page template
+  python/                       # Bundled Python API client (zero external deps)
+    atlassian_client.py          #   Auth, cloud-ID routing, all Jira/Confluence API calls
+    atlassian_cli.py             #   CLI for direct bash usage
+  atlassian-bridge.py           # JSON stdin/stdout bridge (TypeScript calls Python)
+  clients/                      # TypeScript wrappers calling the bridge
+  parsers/                      # .md frontmatter + sprint-status.yaml parsers
+  sync/                         # Sync engine + conflict resolver + field mapper
+  templates/                    # Confluence XHTML page templates
+  config.ts                     # Config loader (.env + optional BMAD config.yaml)
+  cli.ts                        # CLI entry point
 bmad-integration/
-  skills/bmad-atlassian-sync/   # BMAD Claude Code skill files
-  config/                       # Config templates for BMAD and standalone projects
+  skills/bmad-atlassian-sync/   # BMAD shared skill files
+  config/                       # Config templates for BMAD and standalone
 scripts/
-  install-bmad.sh           # Install into a BMAD project
-  install-standalone.sh     # Install CLI standalone
-tests/
-  integration/              # End-to-end round-trip tests
-  parsers/                  # Unit tests for parsers
-  clients/                  # Unit tests for API clients
-  sync/                     # Unit tests for sync engine
+  install-bmad.sh               # Install into a BMAD project
+  install-standalone.sh         # Install CLI standalone
+tests/                          # 67 tests (vitest)
 ```
-
----
 
 ## Development
 
-### Prerequisites
-
-- Node.js 18+
-- npm 9+
-
-### Setup
-
 ```bash
-git clone https://github.com/your-org/bmad-atlassian-sync.git
-cd bmad-atlassian-sync
 npm install
+npm test              # Run all 67 tests
+npm run test:watch    # Watch mode
+npx tsc --noEmit      # Type-check
 ```
-
-### Running Tests
-
-```bash
-# Run all tests
-npm test
-
-# Watch mode
-npm run test:watch
-```
-
-### TypeScript
-
-```bash
-# Type-check without emitting
-npx tsc --noEmit
-
-# Build to dist/
-npm run build
-```
-
----
-
-## Contributing
-
-1. Fork the repository and create a feature branch
-2. Write tests for new functionality (unit tests in `tests/`, integration tests in `tests/integration/`)
-3. Ensure all tests pass: `npm test`
-4. Ensure TypeScript compiles cleanly: `npx tsc --noEmit`
-5. Update this README if you add new features, config options, or CLI commands
-6. Open a pull request with a clear description of the change
-
----
 
 ## License
 
