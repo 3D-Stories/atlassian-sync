@@ -167,6 +167,88 @@ After `install-bmad.sh`, these workflows automatically sync to Jira/Confluence:
 
 All sync steps check `atlassian_sync: enabled` in config and skip silently when not configured.
 
+### BMAD Skill Modifications Required
+
+After installing `atlassian-sync`, the following changes must be made to BMAD workflow skills. These are **not** done automatically by `install-bmad.sh` — they modify BMAD Method core skills and should be applied manually or via a patch.
+
+#### bmad-sprint-planning
+- **workflow.md**: Added `### Atlassian Sync` section after `### Context` in INITIALIZATION
+- **workflow.md**: Added `<step n="6">` before `</workflow>` — creates Jira epics/stories/sprint, creates Confluence sprint overview page, stores `jira_sprint_id` and `confluence_page_id` in `sprint-status.yaml`
+
+#### bmad-create-story
+- **workflow.md**: Added `### Atlassian Sync` section in INITIALIZATION
+- **workflow.md**: Added `<step n="7">` — creates Jira story, writes `jira_key` to story `.md` frontmatter and `sprint-status.yaml`
+- **template.md**: Added YAML frontmatter block with `story_key`, `epic_num`, `story_num`, `status`, `jira_key`, `confluence_page_id` fields
+
+#### bmad-dev-story
+- **workflow.md**: Added `### Atlassian Sync` section in INITIALIZATION
+- **workflow.md**: Added `<step n="2a">` — pulls latest Jira state before starting work (sync-on-start)
+- **workflow.md step 4**: Added Jira transition to "In Progress" (inline check)
+- **workflow.md step 9**: Added Jira transition to "In Review", comment with implementation summary, sync metadata update (inline check)
+
+#### bmad-correct-course
+- **workflow.md**: Added `### Atlassian Sync` section in INITIALIZATION
+- **workflow.md step 5**: Added Jira change-request issue creation and Confluence change proposal page creation after proposal approval (inline check)
+
+#### bmad-retrospective
+- **workflow.md**: Added `### Atlassian Sync` section in INITIALIZATION
+- **workflow.md**: Added `<step n="sync">` before `</workflow>` — creates Confluence retrospective page, links to sprint page, comments on Jira epic
+
+#### bmad-sprint-status
+- **workflow.md**: Added `### Atlassian Sync` section in INITIALIZATION
+- **workflow.md step 2**: Added bidirectional Jira pull — fetches latest statuses for stories with `jira_key`, updates local `sprint-status.yaml` (inline check)
+- **workflow.md step 4**: Added Confluence sprint page refresh with current status data (inline check)
+
+#### bmad-code-review
+- **workflow.md**: Added `### 3. Atlassian Sync` prose section — documents Jira comment with review findings and Done transition via `sync-on-complete` pattern
+
+#### bmad-create-epics-and-stories
+- **workflow.md**: Added `### 3. Atlassian Sync` prose section — documents Jira Epic/Story creation and `jira_key` writeback via `sync-on-complete` pattern
+
+#### bmad-create-prd
+- **workflow.md**: Added `### 2. Atlassian Sync` section documenting multi-page Confluence structure
+- **steps-c/step-12-complete.md**: Added step 5 — asks for Confluence space URL, creates parent page with section summary table, creates child pages per PRD section (Executive Summary, Success Criteria, User Journeys, FRs, NFRs, etc.), stores `confluence_page_id` + `confluence_sections` mapping in frontmatter
+
+#### bmad-edit-prd
+- **workflow.md**: Added `### 2. Atlassian Sync` section documenting selective section update behavior
+- **steps-e/step-e-04-complete.md**: Added step 3 — reads `confluence_sections` mapping, selectively updates only changed child pages, creates new child pages for added sections, archives (adds removal notice, never deletes) pages for removed sections, refreshes parent page summary table
+
+#### bmad-validate-prd
+- **workflow.md**: Added `### 2. Atlassian Sync` section documenting validation report publishing
+- **steps-v/step-v-13-report-complete.md**: Added step 4 — publishes validation report as Confluence page (sibling of PRD parent), updates PRD section pages if "Fix Simpler Items" was applied
+
+### PRD Confluence Page Structure
+
+When `bmad-create-prd` publishes to Confluence, it creates a multi-page hierarchy:
+
+```
+Confluence Space
+└── {project_name} — Product Requirements Document  (parent: summary + links)
+    ├── {project_name} PRD: Executive Summary & Vision
+    ├── {project_name} PRD: Success Criteria & KPIs
+    ├── {project_name} PRD: User Journeys
+    ├── {project_name} PRD: Domain Requirements
+    ├── {project_name} PRD: Functional Requirements
+    ├── {project_name} PRD: Non-Functional Requirements
+    └── {project_name} — PRD Validation Report      (created by validate-prd)
+```
+
+The parent page ID and section-to-page mapping are stored in PRD frontmatter:
+
+```yaml
+---
+confluence_page_id: "12345"
+confluence_sections:
+  executive_summary: "12346"
+  success_criteria: "12347"
+  user_journeys: "12348"
+  functional_requirements: "12349"
+  non_functional_requirements: "12350"
+---
+```
+
+`bmad-edit-prd` and `bmad-validate-prd` read this mapping to update individual section pages without rewriting the entire structure.
+
 ## Architecture
 
 ```
